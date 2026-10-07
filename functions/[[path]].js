@@ -18,6 +18,8 @@ const DEFAULTS = {
   site_url: '', footer_text: '© {year} All rights reserved.', home_title: '', home_desc: 'Dark psychology, billionaire financial leaks and secret AI side-hustle tools.',
   posts_per_page: '12', incontent_after: '2', between_every: '4', ads_enabled: '1', count_admin_views: '0', show_views: '1',
   head_code: '', body_end_code: '', ad_header: '', ad_below_title: '', ad_in_content: '', ad_after_content: '', ad_sidebar: '', ad_between: '', ad_footer: '', ad_sticky_bottom: '',
+  mt_enabled: '1', mt_multitag: '', mt_onclick: '', mt_vignette: '', mt_inpage: '', mt_push: '', mt_direct_url: '', mt_direct_text: 'Download / Read More',
+  ast_enabled: '1', ast_social: '', ast_native: '', ast_728x90: '', ast_468x60: '', ast_320x50: '', ast_300x250: '', ast_160x600: '', ast_160x300: '',
   robots_extra: '', ads_txt: '', twitter: '', facebook: '', instagram: '', youtube: '', tiktok: '', telegram: '', salt: 'x9'
 };
 async function getSettings(env) { const S = { ...DEFAULTS }; try { const { results } = await env.DB.prepare('SELECT key,value FROM settings').all(); for (const r of results) S[r.key] = r.value; } catch (e) { } return S; }
@@ -37,8 +39,26 @@ export async function onRequest({ request, env, next }) {
 }
 
 /* ------------------------- PUBLIC SITE ------------------------- */
-const adBox = (S, k) => (S.ads_enabled === '1' && S[k]) ? `<div class="ad ad-${k}">${S[k]}</div>` : '';
-function layout(S, cats, pages, { title, desc, body, canonical, og = {}, jsonld = '', active = '' }) {
+const wrap = c => { c = (c || '').trim(); return !c ? '' : (c[0] === '<' ? c : `<script>${c}</script>`); };
+const box = (cls, code) => code && code.trim() ? `<div class="ad ${cls}">${wrap(code)}</div>` : '';
+const netOn = (S, n) => S.ads_enabled === '1' && S[n + '_enabled'] !== '0';
+const ast = (S, k) => netOn(S, 'ast') ? box('ast', S['ast_' + k]) : '';
+const adBox = (S, k) => S.ads_enabled === '1' ? box(k, S[k]) : '';
+const mtDirect = S => netOn(S, 'mt') && S.mt_direct_url ? `<div class="ad"><a class="btn" href="${esc(S.mt_direct_url)}" target="_blank" rel="nofollow noopener sponsored">${esc(S.mt_direct_text || 'Read More')}</a></div>` : '';
+const hdrAds = (S, mob) => adBox(S, 'ad_header') + (mob ? ast(S, '320x50') : ast(S, '728x90'));
+const belowTitleAds = (S, mob) => adBox(S, 'ad_below_title') + (mob ? '' : ast(S, '468x60'));
+const inContentAds = S => adBox(S, 'ad_in_content') + ast(S, '300x250');
+const afterContentAds = S => adBox(S, 'ad_after_content') + ast(S, 'native') + mtDirect(S);
+const sideAds = (S, mob) => adBox(S, 'ad_sidebar') + (mob ? '' : ast(S, '160x600')) + ast(S, '160x300');
+const betweenAds = S => adBox(S, 'ad_between') + ast(S, 'native');
+function globalScripts(S) {
+  if (S.ads_enabled !== '1') return '';
+  let o = '';
+  if (S.mt_enabled !== '0') o += ['mt_multitag', 'mt_onclick', 'mt_vignette', 'mt_inpage', 'mt_push'].map(k => wrap(S[k])).join('\n');
+  if (S.ast_enabled !== '0') o += '\n' + wrap(S.ast_social);
+  return o + '\n' + wrap(S.body_end_code);
+}
+function layout(S, cats, pages, { title, desc, body, canonical, og = {}, jsonld = '', active = '', mob = false }) {
   const base = S.site_url.replace(/\/$/, '');
   const t = esc(title), d = esc(desc || S.home_desc);
   const socials = ['twitter', 'facebook', 'instagram', 'youtube', 'tiktok', 'telegram'].filter(k => S[k]).map(k => `<a href="${esc(S[k])}" rel="noopener" target="_blank">${k}</a>`).join('');
@@ -68,9 +88,9 @@ footer{border-top:1px solid var(--b);margin-top:50px;padding:30px 0;color:var(--
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.chips a{padding:7px 14px;border-radius:99px;background:var(--c);border:1px solid var(--b);font-size:14px}.chips a:hover{border-color:var(--a)}</style>
 ${S.head_code}</head><body>
 <header><div class="w nav"><a class="logo" href="/">${esc(S.site_name)}</a><nav><a href="/" class="${active === 'home' ? 'on' : ''}">Home</a>${cats.map(c => `<a href="/category/${c.slug}" class="${active === c.slug ? 'on' : ''}">${c.emoji} ${esc(c.name)}</a>`).join('')}</nav></div></header>
-<div class="w">${adBox(S, 'ad_header')}${body}${adBox(S, 'ad_footer')}</div>
+<div class="w">${hdrAds(S, mob)}${body}${adBox(S, 'ad_footer')}</div>
 <footer><div class="w">${pages.map(pg => `<a href="/p/${pg.slug}">${esc(pg.title)}</a>`).join('')}<div style="margin:10px 0">${socials}</div>${esc(S.footer_text.replace('{year}', new Date().getFullYear()))}</div></footer>
-${S.ads_enabled === '1' && S.ad_sticky_bottom ? `<div class="sticky">${S.ad_sticky_bottom}</div>` : ''}${S.ads_enabled === '1' ? S.body_end_code : ''}</body></html>`;
+${S.ads_enabled === '1' && S.ad_sticky_bottom ? `<div class="sticky">${S.ad_sticky_bottom}</div>` : ''}${globalScripts(S)}</body></html>`;
 }
 function card(p, cats) {
   const c = cats.find(x => x.id === p.category_id);
@@ -80,7 +100,7 @@ async function site(request, env, url, p) {
   const S = await getSettings(env); const now = nowISO();
   const { results: cats } = await env.DB.prepare('SELECT * FROM categories ORDER BY sort,id').all();
   const { results: pages } = await env.DB.prepare('SELECT title,slug FROM pages WHERE in_footer=1').all();
-  const base = (S.site_url || url.origin).replace(/\/$/, ''); const L = o => html(layout(S, cats, pages, o), 200, { 'cache-control': 'public, max-age=60' });
+  const base = (S.site_url || url.origin).replace(/\/$/, ''); const mob = /Mobi|Android|iPhone|iPad/i.test(request.headers.get('user-agent') || ''); const lay = o => layout(S, cats, pages, { ...o, mob }); const L = o => html(lay(o), 200, { 'cache-control': 'private, max-age=0' });
   const per = Math.max(1, parseInt(S.posts_per_page) || 12); const page = Math.max(1, parseInt(url.searchParams.get('page')) || 1);
   const PUB = "status='published' AND published_at<=?";
 
@@ -92,7 +112,7 @@ async function site(request, env, url, p) {
     return new Response(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${u.map(([l, m]) => `<url><loc>${esc(l)}</loc>${m ? `<lastmod>${m.slice(0, 10)}</lastmod>` : ''}</url>`).join('')}</urlset>`, { headers: { 'content-type': 'application/xml' } });
   }
   const pager = (total, path) => { const pc = Math.ceil(total / per); if (pc <= 1) return ''; const j = path.includes('?') ? '&' : '?'; return `<div class="pager">${page > 1 ? `<a href="${path}${j}page=${page - 1}">← Newer</a>` : ''}<span class="meta">Page ${page} / ${pc}</span>${page < pc ? `<a href="${path}${j}page=${page + 1}">Older →</a>` : ''}</div>`; };
-  const gridHTML = (list) => { const ev = Math.max(1, parseInt(S.between_every) || 4); return `<div class="grid">${list.map((x, i) => card(x, cats) + ((i + 1) % ev === 0 && S.ad_between && S.ads_enabled === '1' ? `<div style="grid-column:1/-1">${adBox(S, 'ad_between')}</div>` : '')).join('')}</div>`; };
+  const gridHTML = (list) => { const ev = Math.max(1, parseInt(S.between_every) || 4); const ba = betweenAds(S); return `<div class="grid">${list.map((x, i) => card(x, cats) + ((i + 1) % ev === 0 && ba ? `<div style="grid-column:1/-1">${ba}</div>` : '')).join('')}</div>`; };
 
   if (p === '/') {
     const tot = (await env.DB.prepare(`SELECT COUNT(*) n FROM posts WHERE ${PUB}`).bind(now).first()).n;
@@ -105,41 +125,41 @@ async function site(request, env, url, p) {
   if (p === '/search') {
     const q = (url.searchParams.get('q') || '').trim(); const like = `%${q}%`;
     const { results } = q ? await env.DB.prepare(`SELECT * FROM posts WHERE ${PUB} AND (title LIKE ? OR excerpt LIKE ? OR tags LIKE ?) ORDER BY published_at DESC LIMIT 30`).bind(now, like, like, like).all() : { results: [] };
-    return html(layout(S, cats, pages, { title: `Search: ${q} — ${S.site_name}`, desc: '', body: `<section class="hero"><h1>Search: ${esc(q)}</h1><form class="s" action="/search"><input name="q" value="${esc(q)}"><button>Search</button></form></section>${gridHTML(results)}${q && !results.length ? '<p class="meta">Nothing found.</p>' : ''}` }));
+    return html(lay({ title: `Search: ${q} — ${S.site_name}`, desc: '', body: `<section class="hero"><h1>Search: ${esc(q)}</h1><form class="s" action="/search"><input name="q" value="${esc(q)}"><button>Search</button></form></section>${gridHTML(results)}${q && !results.length ? '<p class="meta">Nothing found.</p>' : ''}` }));
   }
   let m;
   if ((m = p.match(/^\/category\/([^/]+)$/))) {
-    const c = cats.find(x => x.slug === m[1]); if (!c) return html(layout(S, cats, pages, { title: '404', body: '<h1>Category not found</h1>' }), 404);
+    const c = cats.find(x => x.slug === m[1]); if (!c) return html(lay({ title: '404', body: '<h1>Category not found</h1>' }), 404);
     const tot = (await env.DB.prepare(`SELECT COUNT(*) n FROM posts WHERE category_id=? AND ${PUB}`).bind(c.id, now).first()).n;
     const { results } = await env.DB.prepare(`SELECT * FROM posts WHERE category_id=? AND ${PUB} ORDER BY published_at DESC LIMIT ? OFFSET ?`).bind(c.id, now, per, (page - 1) * per).all();
     return L({ title: `${c.name} — ${S.site_name}`, desc: c.description, canonical: `${base}/category/${c.slug}`, active: c.slug, body: `<section class="hero"><h1>${c.emoji} ${esc(c.name)}</h1><p>${esc(c.description)}</p></section>${gridHTML(results)}${!results.length ? '<p class="meta">No posts yet.</p>' : ''}${pager(tot, '/category/' + c.slug)}` });
   }
   if ((m = p.match(/^\/p\/([^/]+)$/))) {
     const pg = await env.DB.prepare('SELECT * FROM pages WHERE slug=?').bind(m[1]).first();
-    if (!pg) return html(layout(S, cats, pages, { title: '404', body: '<h1>Page not found</h1>' }), 404);
+    if (!pg) return html(lay({ title: '404', body: '<h1>Page not found</h1>' }), 404);
     return L({ title: `${pg.title} — ${S.site_name}`, desc: '', canonical: `${base}/p/${pg.slug}`, body: `<article style="max-width:780px;margin:30px auto"><h1>${esc(pg.title)}</h1><div class="content">${pg.content}</div></article>` });
   }
   if ((m = p.match(/^\/post\/([^/]+)$/))) {
     const post = await env.DB.prepare(`SELECT * FROM posts WHERE slug=? AND ${PUB}`).bind(decodeURIComponent(m[1]), now).first();
-    if (!post) return html(layout(S, cats, pages, { title: '404', body: '<h1>Post not found</h1>' }), 404);
+    if (!post) return html(lay({ title: '404', body: '<h1>Post not found</h1>' }), 404);
     const c = cats.find(x => x.id === post.category_id);
     let content = post.content;
-    if (S.ads_enabled === '1' && S.ad_in_content) { const n = Math.max(1, parseInt(S.incontent_after) || 2); const parts = content.split('</p>'); if (parts.length > n) { parts.splice(n, 0, `</p>${adBox(S, 'ad_in_content')}`); content = parts.join('</p>').replace('</p></p>', '</p>'); } }
+    const inad = inContentAds(S); if (inad) { const n = Math.max(1, parseInt(S.incontent_after) || 2); const parts = content.split('</p>'); if (parts.length > n) content = parts.slice(0, n).join('</p>') + '</p>' + inad + parts.slice(n).join('</p>'); }
     const { results: rel } = await env.DB.prepare(`SELECT * FROM posts WHERE ${PUB} AND id!=? AND category_id=? ORDER BY published_at DESC LIMIT 3`).bind(now, post.id, post.category_id || 0).all();
     const { results: pop } = await env.DB.prepare(`SELECT title,slug FROM posts WHERE ${PUB} ORDER BY views DESC LIMIT 5`).bind(now).all();
     const purl = `${base}/post/${post.slug}`, ttl = encodeURIComponent(post.title);
     const tags = post.tags ? post.tags.split(',').map(t => t.trim()).filter(Boolean).map(t => `<a class="badge" href="/search?q=${encodeURIComponent(t)}">#${esc(t)}</a>`).join(' ') : '';
     const body = `<div class="art"><article><span class="badge">${c ? `<a href="/category/${c.slug}">${c.emoji} ${esc(c.name)}</a>` : 'General'}</span><h1>${esc(post.title)}</h1>
 <div class="meta">${fmtDate(post.published_at)} • ${readTime(post.content)} min read${S.show_views === '1' ? ` • 👁 <span id="vc">${post.views}</span> views` : ''}</div>
-${post.cover ? `<img class="cover" src="${esc(post.cover)}" alt="${esc(post.title)}">` : ''}${adBox(S, 'ad_below_title')}<div class="content">${content}</div>${adBox(S, 'ad_after_content')}
+${post.cover ? `<img class="cover" src="${esc(post.cover)}" alt="${esc(post.title)}">` : ''}${belowTitleAds(S, mob)}<div class="content">${content}</div>${afterContentAds(S)}
 <div style="margin:20px 0">${tags}</div><div class="share"><a target="_blank" rel="noopener" href="https://wa.me/?text=${ttl}%20${encodeURIComponent(purl)}">WhatsApp</a><a target="_blank" rel="noopener" href="https://twitter.com/intent/tweet?text=${ttl}&url=${encodeURIComponent(purl)}">X</a><a target="_blank" rel="noopener" href="https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(purl)}">Facebook</a><a target="_blank" rel="noopener" href="https://t.me/share/url?url=${encodeURIComponent(purl)}&text=${ttl}">Telegram</a></div>
 ${rel.length ? `<h3 style="margin-top:34px">Related</h3><div class="grid">${rel.map(x => card(x, cats)).join('')}</div>` : ''}</article>
-<aside class="side">${adBox(S, 'ad_sidebar')}<div class="box"><h4>🔥 Popular</h4>${pop.map(x => `<a href="/post/${x.slug}">${esc(x.title)}</a>`).join('')}</div><div class="box"><h4>Categories</h4>${cats.map(x => `<a href="/category/${x.slug}">${x.emoji} ${esc(x.name)}</a>`).join('')}</div></aside></div>
+<aside class="side">${sideAds(S, mob)}<div class="box"><h4>🔥 Popular</h4>${pop.map(x => `<a href="/post/${x.slug}">${esc(x.title)}</a>`).join('')}</div><div class="box"><h4>Categories</h4>${cats.map(x => `<a href="/category/${x.slug}">${x.emoji} ${esc(x.name)}</a>`).join('')}</div></aside></div>
 <script>fetch('/api/view',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:${post.id}})}).then(r=>r.json()).then(d=>{var e=document.getElementById('vc');if(e&&d.views)e.textContent=d.views}).catch(()=>{})</script>`;
     const ld = JSON.stringify({ '@context': 'https://schema.org', '@type': 'Article', headline: post.title, image: post.cover || undefined, datePublished: post.published_at, dateModified: post.updated_at, description: post.seo_desc || post.excerpt, mainEntityOfPage: purl });
-    return html(layout(S, cats, pages, { title: post.seo_title || `${post.title} — ${S.site_name}`, desc: post.seo_desc || post.excerpt, body, canonical: purl, og: { type: 'article', image: post.cover }, jsonld: ld.replace(/</g, '\\u003c') }), 200, { 'cache-control': 'public, max-age=30' });
+    return html(lay({ title: post.seo_title || `${post.title} — ${S.site_name}`, desc: post.seo_desc || post.excerpt, body, canonical: purl, og: { type: 'article', image: post.cover }, jsonld: ld.replace(/</g, '\\u003c') }), 200, { 'cache-control': 'private, max-age=0' });
   }
-  return html(layout(S, cats, pages, { title: '404', body: '<section class="hero"><h1>404</h1><p>Page not found.</p></section>' }), 404);
+  return html(lay({ title: '404', body: '<section class="hero"><h1>404</h1><p>Page not found.</p></section>' }), 404);
 }
 
 /* ------------------------- API ------------------------- */
