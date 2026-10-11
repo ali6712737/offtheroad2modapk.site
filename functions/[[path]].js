@@ -16,7 +16,8 @@ async function isAuth(req, env) {
 const DEFAULTS = {
   site_name: 'Hidden Edge', tagline: 'Dark Psychology • Billionaire Money Secrets • AI Side Hustles', accent: '#a855f7', accent2: '#f5c451',
   site_url: '', footer_text: '© {year} All rights reserved.', home_title: '', home_desc: 'Dark psychology, billionaire financial leaks and secret AI side-hustle tools.',
-  posts_per_page: '12', incontent_after: '2', between_every: '4', dl_wait1: '10', dl_wait2: '10', dl_btn_text: 'Download',
+  posts_per_page: '12', incontent_after: '2', between_every: '4', preset_auto: '1', preset_title: '', preset_content: '', preset_excerpt: '', preset_tags: '', preset_category: '', preset_cover: '', preset_seo_title: '', preset_seo_desc: '',
+  dl_wait1: '10', dl_wait2: '10', dl_btn_text: 'Download',
   ads_enabled: '1', count_admin_views: '0', show_views: '1',
   head_code: '', body_end_code: '', ad_header: '', ad_below_title: '', ad_in_content: '', ad_after_content: '', ad_sidebar: '', ad_between: '', ad_footer: '', ad_sticky_bottom: '',
   mt_enabled: '1', mt_multitag: '', mt_onclick: '', mt_vignette: '', mt_inpage: '', mt_push: '', mt_direct_url: '', mt_direct_text: 'Download / Read More',
