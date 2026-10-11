@@ -16,7 +16,8 @@ async function isAuth(req, env) {
 const DEFAULTS = {
   site_name: 'Hidden Edge', tagline: 'Dark Psychology • Billionaire Money Secrets • AI Side Hustles', accent: '#a855f7', accent2: '#f5c451',
   site_url: '', footer_text: '© {year} All rights reserved.', home_title: '', home_desc: 'Dark psychology, billionaire financial leaks and secret AI side-hustle tools.',
-  posts_per_page: '12', incontent_after: '2', between_every: '4', ads_enabled: '1', count_admin_views: '0', show_views: '1',
+  posts_per_page: '12', incontent_after: '2', between_every: '4', dl_wait1: '10', dl_wait2: '10', dl_btn_text: 'Download',
+  ads_enabled: '1', count_admin_views: '0', show_views: '1',
   head_code: '', body_end_code: '', ad_header: '', ad_below_title: '', ad_in_content: '', ad_after_content: '', ad_sidebar: '', ad_between: '', ad_footer: '', ad_sticky_bottom: '',
   mt_enabled: '1', mt_multitag: '', mt_onclick: '', mt_vignette: '', mt_inpage: '', mt_push: '', mt_direct_url: '', mt_direct_text: 'Download / Read More',
   ast_enabled: '1', ast_social: '', ast_native: '', ast_728x90: '', ast_468x60: '', ast_320x50: '', ast_300x250: '', ast_160x600: '', ast_160x300: '',
@@ -28,8 +29,11 @@ const readTime = c => Math.max(1, Math.round(String(c).replace(/<[^>]+>/g, ' ').
 const fmtDate = d => new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 const BOT = /bot|crawl|spider|slurp|preview|facebookexternalhit|curl|wget|headless|lighthouse/i;
 
+let migrated = false;
+async function migrate(env) { if (migrated) return; migrated = true; try { await env.DB.prepare("ALTER TABLE posts ADD COLUMN download_url TEXT DEFAULT ''").run(); } catch (e) { } }
+
 export async function onRequest({ request, env, next }) {
-  const url = new URL(request.url); const p = url.pathname.replace(/\/+$/, '') || '/';
+  const url = new URL(request.url); if (env.DB) await migrate(env); const p = url.pathname.replace(/\/+$/, '') || '/';
   try {
     if (p === '/admin' || p.startsWith('/admin/')) return next();
     if (p.startsWith('/api/')) return await api(request, env, url, p);
@@ -96,6 +100,24 @@ function card(p, cats) {
   const c = cats.find(x => x.id === p.category_id);
   return `<a class="card" href="/post/${p.slug}"><div class="img" style="${p.cover ? `background-image:url('${esc(p.cover)}')` : ''}">${p.cover ? '' : (c?.emoji || '📰')}</div><div class="in"><span class="badge">${esc(c?.name || 'General')}</span><h3>${esc(p.title)}</h3><p>${esc((p.excerpt || '').slice(0, 130))}</p><div class="meta">${fmtDate(p.published_at)} • ${readTime(p.content)} min${''}</div></div></a>`;
 }
+
+function dlFlow(S, post) {
+  const u = (post.download_url || '').trim(); if (!/^https?:\/\//i.test(u)) return { top: '', bottom: '', script: '' };
+  const w1 = Math.max(1, parseInt(S.dl_wait1) || 10), w2 = Math.max(1, parseInt(S.dl_wait2) || 10);
+  const css = '<style>.dl{background:var(--c);border:1px solid var(--a);border-radius:14px;padding:16px;text-align:center;margin:18px 0}.dl-top{position:sticky;top:64px;z-index:15;background:#12121bf2}.dl .btn{font-size:17px;padding:12px 26px;display:inline-block;margin-top:6px}.dl b{color:var(--g);font-size:22px}</style>';
+  const top = `${css}<div id="dlTop" class="dl dl-top"><div id="dlTopMsg">⏳ Please wait <b id="dlT1">${w1}</b> seconds…</div><button id="dlCont" class="btn" style="display:none">Continue ↓</button></div>`;
+  const bottom = `<div id="dlEnd" class="dl"><div id="dlEndMsg">🔒 Click “Continue” at the top first.</div><a id="dlBtn" class="btn" style="display:none" target="_blank" rel="nofollow noopener">⬇ ${esc(S.dl_btn_text || 'Download')}</a></div>`;
+  const url = JSON.stringify(u).replace(/</g, '\\u003c');
+  const script = `<script>(function(){var W1=${w1},W2=${w2},URL=${url};var $=function(i){return document.getElementById(i)};var top=$('dlTop'),cont=$('dlCont'),end=$('dlEnd'),endMsg=$('dlEndMsg'),btn=$('dlBtn'),clicked=false,started=false,stop=false;
+function countdown(sec,tick,done){var s=sec;tick(s);var h=setInterval(function(){if(document.hidden)return;s--;tick(s);if(s<=0){clearInterval(h);done()}},1000)}
+countdown(W1,function(s){$('dlT1').textContent=s},function(){$('dlTopMsg').textContent='✅ Ready! Click Continue.';cont.style.display='inline-block'});
+function startSecond(){if(started)return;started=true;top.style.display='none';endMsg.innerHTML='⏳ Please wait <b id="dlT2">'+W2+'</b> seconds…';countdown(W2,function(s){var e=$('dlT2');if(e)e.textContent=s},function(){endMsg.textContent='✅ Your download is ready';btn.href=URL;btn.style.display='inline-block'})}
+function autoScroll(){var r0=end.getBoundingClientRect(),dist=Math.max(0,r0.top+scrollY-scrollY);var speed=Math.max(0.3,Math.abs(r0.top)/30000);var last=null;function step(ts){if(stop)return;if(last===null)last=ts;var dt=ts-last;last=ts;var r=end.getBoundingClientRect();var tgt=r.top+scrollY-(innerHeight-r.height)/2;var cur=scrollY;if(cur>=tgt-2)return;scrollTo(0,Math.min(tgt,cur+speed*dt));requestAnimationFrame(step)}requestAnimationFrame(step)}
+cont.onclick=function(){if(clicked)return;clicked=true;cont.style.display='none';$('dlTopMsg').textContent='⬇ Scrolling to the end of the article…';['wheel','touchstart','keydown'].forEach(function(e){addEventListener(e,function(){stop=true},{passive:true,once:true})});
+if('IntersectionObserver' in window){new IntersectionObserver(function(en,ob){if(en[0].isIntersecting){startSecond();ob.disconnect()}},{threshold:0.6}).observe(end)}else{setTimeout(startSecond,8000)}autoScroll()};})()</script>`;
+  return { top, bottom, script };
+}
+
 async function site(request, env, url, p) {
   const S = await getSettings(env); const now = nowISO();
   const { results: cats } = await env.DB.prepare('SELECT * FROM categories ORDER BY sort,id').all();
@@ -147,15 +169,15 @@ async function site(request, env, url, p) {
     const inad = inContentAds(S); if (inad) { const n = Math.max(1, parseInt(S.incontent_after) || 2); const parts = content.split('</p>'); if (parts.length > n) content = parts.slice(0, n).join('</p>') + '</p>' + inad + parts.slice(n).join('</p>'); }
     const { results: rel } = await env.DB.prepare(`SELECT * FROM posts WHERE ${PUB} AND id!=? AND category_id=? ORDER BY published_at DESC LIMIT 3`).bind(now, post.id, post.category_id || 0).all();
     const { results: pop } = await env.DB.prepare(`SELECT title,slug FROM posts WHERE ${PUB} ORDER BY views DESC LIMIT 5`).bind(now).all();
-    const purl = `${base}/post/${post.slug}`, ttl = encodeURIComponent(post.title);
+    const dl = dlFlow(S, post); const purl = `${base}/post/${post.slug}`, ttl = encodeURIComponent(post.title);
     const tags = post.tags ? post.tags.split(',').map(t => t.trim()).filter(Boolean).map(t => `<a class="badge" href="/search?q=${encodeURIComponent(t)}">#${esc(t)}</a>`).join(' ') : '';
     const body = `<div class="art"><article><span class="badge">${c ? `<a href="/category/${c.slug}">${c.emoji} ${esc(c.name)}</a>` : 'General'}</span><h1>${esc(post.title)}</h1>
 <div class="meta">${fmtDate(post.published_at)} • ${readTime(post.content)} min read${S.show_views === '1' ? ` • 👁 <span id="vc">${post.views}</span> views` : ''}</div>
-${post.cover ? `<img class="cover" src="${esc(post.cover)}" alt="${esc(post.title)}">` : ''}${belowTitleAds(S, mob)}<div class="content">${content}</div>${afterContentAds(S)}
+${post.cover ? `<img class="cover" src="${esc(post.cover)}" alt="${esc(post.title)}">` : ''}${belowTitleAds(S, mob)}${dl.top}<div class="content">${content}</div>${dl.bottom}${afterContentAds(S)}
 <div style="margin:20px 0">${tags}</div><div class="share"><a target="_blank" rel="noopener" href="https://wa.me/?text=${ttl}%20${encodeURIComponent(purl)}">WhatsApp</a><a target="_blank" rel="noopener" href="https://twitter.com/intent/tweet?text=${ttl}&url=${encodeURIComponent(purl)}">X</a><a target="_blank" rel="noopener" href="https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(purl)}">Facebook</a><a target="_blank" rel="noopener" href="https://t.me/share/url?url=${encodeURIComponent(purl)}&text=${ttl}">Telegram</a></div>
 ${rel.length ? `<h3 style="margin-top:34px">Related</h3><div class="grid">${rel.map(x => card(x, cats)).join('')}</div>` : ''}</article>
 <aside class="side">${sideAds(S, mob)}<div class="box"><h4>🔥 Popular</h4>${pop.map(x => `<a href="/post/${x.slug}">${esc(x.title)}</a>`).join('')}</div><div class="box"><h4>Categories</h4>${cats.map(x => `<a href="/category/${x.slug}">${x.emoji} ${esc(x.name)}</a>`).join('')}</div></aside></div>
-<script>fetch('/api/view',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:${post.id}})}).then(r=>r.json()).then(d=>{var e=document.getElementById('vc');if(e&&d.views)e.textContent=d.views}).catch(()=>{})</script>`;
+${dl.script}<script>fetch('/api/view',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:${post.id}})}).then(r=>r.json()).then(d=>{var e=document.getElementById('vc');if(e&&d.views)e.textContent=d.views}).catch(()=>{})</script>`;
     const ld = JSON.stringify({ '@context': 'https://schema.org', '@type': 'Article', headline: post.title, image: post.cover || undefined, datePublished: post.published_at, dateModified: post.updated_at, description: post.seo_desc || post.excerpt, mainEntityOfPage: purl });
     return html(lay({ title: post.seo_title || `${post.title} — ${S.site_name}`, desc: post.seo_desc || post.excerpt, body, canonical: purl, og: { type: 'article', image: post.cover }, jsonld: ld.replace(/</g, '\\u003c') }), 200, { 'cache-control': 'private, max-age=0' });
   }
@@ -253,8 +275,8 @@ async function api(req, env, url, p) {
 async function savePost(DB, b, id = 0) {
   const now = nowISO(); let slug = slugify(b.slug || b.title), base = slug, n = 1;
   while (await DB.prepare('SELECT id FROM posts WHERE slug=? AND id!=?').bind(slug, id).first()) slug = base + '-' + (++n);
-  const f = [b.title || 'Untitled', slug, b.excerpt || '', b.content || '', b.cover || '', b.category_id ? +b.category_id : null, b.tags || '', b.status === 'published' ? 'published' : 'draft', b.featured ? 1 : 0, b.seo_title || '', b.seo_desc || '', b.published_at || now];
-  if (id) { await DB.prepare('UPDATE posts SET title=?,slug=?,excerpt=?,content=?,cover=?,category_id=?,tags=?,status=?,featured=?,seo_title=?,seo_desc=?,published_at=?,updated_at=? WHERE id=?').bind(...f, now, id).run(); return id; }
-  const r = await DB.prepare('INSERT INTO posts (title,slug,excerpt,content,cover,category_id,tags,status,featured,seo_title,seo_desc,published_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(...f, now, now).run();
+  const f = [b.title || 'Untitled', slug, b.excerpt || '', b.content || '', b.cover || '', b.category_id ? +b.category_id : null, b.tags || '', b.status === 'published' ? 'published' : 'draft', b.featured ? 1 : 0, b.seo_title || '', b.seo_desc || '', b.published_at || now, (b.download_url || '').trim()];
+  if (id) { await DB.prepare('UPDATE posts SET title=?,slug=?,excerpt=?,content=?,cover=?,category_id=?,tags=?,status=?,featured=?,seo_title=?,seo_desc=?,published_at=?,download_url=?,updated_at=? WHERE id=?').bind(...f, now, id).run(); return id; }
+  const r = await DB.prepare('INSERT INTO posts (title,slug,excerpt,content,cover,category_id,tags,status,featured,seo_title,seo_desc,published_at,download_url,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(...f, now, now).run();
   return r.meta.last_row_id;
 }
