@@ -224,8 +224,8 @@ async function api(req, env, url, p) {
   }
   if (p === '/api/admin/posts' && method === 'GET') {
     const q = url.searchParams.get('q') || '', st = url.searchParams.get('status') || '', cat = url.searchParams.get('cat') || '';
-    let sql = 'SELECT p.id,p.title,p.slug,p.status,p.featured,p.views,p.published_at,p.category_id,c.name cname FROM posts p LEFT JOIN categories c ON c.id=p.category_id WHERE 1=1', b = [];
-    if (q) { sql += ' AND p.title LIKE ?'; b.push(`%${q}%`); } if (st) { sql += ' AND p.status=?'; b.push(st); } if (cat) { sql += ' AND p.category_id=?'; b.push(cat); }
+    let sql = 'SELECT p.id,p.title,p.slug,p.status,p.featured,p.views,p.published_at,p.category_id,p.download_url,c.name cname FROM posts p LEFT JOIN categories c ON c.id=p.category_id WHERE 1=1', b = [];
+    if (q) { sql += ' AND (p.title LIKE ? OR p.download_url LIKE ?)'; b.push(`%${q}%`, `%${q}%`); } if (st) { sql += ' AND p.status=?'; b.push(st); } if (cat) { sql += ' AND p.category_id=?'; b.push(cat); }
     const { results } = await DB.prepare(sql + ' ORDER BY p.id DESC LIMIT 300').bind(...b).all(); return json(results);
   }
   if (p === '/api/admin/posts' && method === 'POST') return json({ id: await savePost(DB, body) });
@@ -238,9 +238,10 @@ async function api(req, env, url, p) {
     else if (body.action === 'unfeature') await DB.prepare(`UPDATE posts SET featured=0 WHERE id IN (${ph})`).bind(...ids).run();
     return json({ ok: true });
   }
-  if ((m = p.match(/^\/api\/admin\/posts\/(\d+)(\/dup|\/reset-views)?$/))) {
+  if ((m = p.match(/^\/api\/admin\/posts\/(\d+)(\/dup|\/reset-views|\/link)?$/))) {
     const id = +m[1];
     if (m[2] === '/dup') { const o = await DB.prepare('SELECT * FROM posts WHERE id=?').bind(id).first(); if (!o) return json({ error: 'nf' }, 404); return json({ id: await savePost(DB, { ...o, title: o.title + ' (copy)', slug: '', status: 'draft', featured: 0 }) }); }
+    if (m[2] === '/link' && method === 'PUT') { await DB.prepare('UPDATE posts SET download_url=?, updated_at=? WHERE id=?').bind((body.download_url || '').trim(), nowISO(), id).run(); return json({ ok: true }); }
     if (m[2] === '/reset-views') { await DB.prepare('DELETE FROM views WHERE post_id=?').bind(id).run(); await DB.prepare('UPDATE posts SET views=0 WHERE id=?').bind(id).run(); return json({ ok: true }); }
     if (method === 'GET') return json(await DB.prepare('SELECT * FROM posts WHERE id=?').bind(id).first());
     if (method === 'PUT') { await savePost(DB, body, id); return json({ ok: true }); }
